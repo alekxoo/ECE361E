@@ -63,7 +63,7 @@ class LogisticRegression(nn.Module):
 
 
 model = LogisticRegression(input_size, num_classes)
-
+model = model.to(torch.device('cuda'))
 # Define your loss and optimizer
 criterion = nn.CrossEntropyLoss()  # Softmax is internally computed.
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
