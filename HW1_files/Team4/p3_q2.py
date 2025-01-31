@@ -2,17 +2,16 @@ import torch
 import torch.nn as nn
 import torchvision.datasets as dsets
 import torchvision.transforms as transforms
+import torch.nn.functional as F
 import argparse
 import random
 import numpy as np
-
-# NOTE: added imports
-import time
-from typing import List, Tuple
-import csv
+from thop import profile
+import os
+from torchsummary import summary
 
 # Argument parser
-parser = argparse.ArgumentParser(description='ECE361E HW1 - Starter code')
+parser = argparse.ArgumentParser(description='ECE361E HW1 - myCNN')
 # Define the mini-batch size, here the size is 128 images per batch
 parser.add_argument('--batch_size', type=int, default=128, help='Number of samples per mini-batch')
 # Define the number of epochs for training
@@ -21,8 +20,6 @@ parser.add_argument('--epochs', type=int, default=25, help='Number of epoch to t
 parser.add_argument('--lr', type=float, default=0.01, help='Learning rate')
 args = parser.parse_args()
 
-# The size of input features
-input_size = 28 * 28
 # The number of target classes, you have 10 digits to classify
 num_classes = 10
 
@@ -47,36 +44,48 @@ g = torch.Generator()
 g.manual_seed(random_seed) # for data loader shuffling
 
 # MNIST Dataset (Images and Labels)
+# TODO: Insert here the normalized MNIST dataset
 train_dataset = dsets.MNIST(root='data', train=True, transform=transforms.ToTensor(), download=True)
 test_dataset = dsets.MNIST(root='data', train=False, transform=transforms.ToTensor())
 
 # Dataset Loader (Input Pipeline)
-train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, generator=g)
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True,generator=g)
 test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
-# Define your model
-class LogisticRegression(nn.Module):
-    def __init__(self, input_size, num_classes):
-        super(LogisticRegression, self).__init__()
-        self.linear = nn.Linear(input_size, num_classes)
 
-    # Your model only contains a single linear layer
+# Define your model
+class myCNN(nn.Module):
+    def __init__(self, num_classes):
+        super(myCNN, self).__init__()
+        self.conv1 = nn.Conv2d(1, 8, kernel_size=3, stride=1, padding=1)
+        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.conv2 = nn.Conv2d(8, 16, kernel_size=3, stride=1, padding=1)
+        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.linear1 = nn.Linear(7 * 7 * 16, num_classes)
+
     def forward(self, x):
-        out = self.linear(x)
+        out = F.relu(self.conv1(x))
+        out = self.pool1(out)
+        out = F.relu(self.conv2(out))
+        out = self.pool2(out)
+        out = out.view(out.size(0), -1)
+        out = self.linear1(out)
         return out
 
-
-model = LogisticRegression(input_size, num_classes)
+model = myCNN(num_classes)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
+
+# NOTE: MACs/FLOPs are architecture dependent 
+dummy_input = torch.randn(1, 1, 28, 28).to(device)
+macs, params = profile(model, inputs=(dummy_input,))
+print(f'MACs: {macs:,}')
+print(f'Parameters: {params:,}')
+
 
 # Define your loss and optimizer
 criterion = nn.CrossEntropyLoss()  # Softmax is internally computed.
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
-
-# NOTE: variable for time calculation
-total_train_time = 0 
-total_test_time = 0 # inference time
 
 # Training loop
 for epoch in range(num_epochs):
@@ -87,13 +96,8 @@ for epoch in range(num_epochs):
     # Sets the model in training mode.
     model = model.train()
     for batch_idx, (images, labels) in enumerate(train_loader):
-        # NOTE: start time for training
-        start_train_time = time.time()
-
-        # NOTE: move tensors into same device
+        # NOTE
         images, labels = images.to(device), labels.to(device) 
-        # Here we vectorize the 28*28 images as several 784-dimensional inputs
-        images = images.view(-1, input_size)
         # Sets the gradients to zero
         optimizer.zero_grad()
         # The actual inference
@@ -110,24 +114,12 @@ for epoch in range(num_epochs):
         _, predicted = outputs.max(1)
         train_total += labels.size(0)
         train_correct += predicted.eq(labels).sum().item()
-
-        # NOTE: end time for training 
-        train_time = time.time() - start_train_time
-        total_train_time += train_time
-
         # Print every 100 steps the following information
         if (batch_idx + 1) % 100 == 0:
             print('Epoch: [%d/%d], Step: [%d/%d], Loss: %.4f Acc: %.2f%%' % (epoch + 1, num_epochs, batch_idx + 1,
                                                                              len(train_dataset) // batch_size,
                                                                              train_loss / (batch_idx + 1),
-                                                                             100. * train_correct / train_total))            
-        # NOTE: index == 468
-        if (batch_idx + 1) == 468:
-            print('Epoch: [%d/%d], Step: [%d/%d], Loss: %.4f Acc: %.2f%%' % (epoch + 1, num_epochs, batch_idx + 1,
-                                                                             len(train_dataset) // batch_size,
-                                                                             train_loss / (batch_idx + 1),
                                                                              100. * train_correct / train_total))
-
     # Testing phase
     test_correct = 0
     test_total = 0
@@ -138,10 +130,8 @@ for epoch in range(num_epochs):
     # It will reduce memory consumption for computations.
     with torch.no_grad():
         for batch_idx, (images, labels) in enumerate(test_loader):
-            start_test_time = time.time()
-            images, labels = images.to(device), labels.to(device)  # Move inside loop
-            # Here we vectorize the 28*28 images as several 784-dimensional inputs
-            images = images.view(-1, input_size)
+            # NOTE
+            images, labels = images.to(device), labels.to(device) 
             # Perform the actual inference
             outputs = model(images)
             # Compute the loss
@@ -150,16 +140,15 @@ for epoch in range(num_epochs):
             # The outputs are one-hot labels, we need to find the actual predicted
             # labels which have the highest output confidence
             _, predicted = torch.max(outputs.data, 1)
-
-            # NOTE: end time for inference
-            test_time = time.time() - start_test_time
-            total_test_time += test_time
-
             test_total += labels.size(0)
             test_correct += predicted.eq(labels).sum().item()
 
     print('Test accuracy: %.2f %% Test loss: %.4f' % (100. * test_correct / test_total, test_loss / (batch_idx + 1)))
 
-print('Total training time: %.2f seconds' % total_train_time)
-print('Total inference time: %.2f seconds' % total_test_time)
-print('Average inference time per image: %.2f ms' % (total_test_time * 1000 / test_total))
+# Save model and get size
+torch.save(model.state_dict(), 'model.pth')
+model_size_mb = os.path.getsize('model.pth') / (1024 * 1024)
+print(f'Model size: {model_size_mb:.2f} MB')
+
+# Get model summary
+summary(model, input_size=(1, 28, 28))  # Note: Only need (C,H,W) here

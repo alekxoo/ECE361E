@@ -2,17 +2,13 @@ import torch
 import torch.nn as nn
 import torchvision.datasets as dsets
 import torchvision.transforms as transforms
+import torch.nn.functional as F
 import argparse
 import random
 import numpy as np
 
-# NOTE: added imports
-import time
-from typing import List, Tuple
-import csv
-
 # Argument parser
-parser = argparse.ArgumentParser(description='ECE361E HW1 - Starter code')
+parser = argparse.ArgumentParser(description='ECE361E HW1 - SimpleFC')
 # Define the mini-batch size, here the size is 128 images per batch
 parser.add_argument('--batch_size', type=int, default=128, help='Number of samples per mini-batch')
 # Define the number of epochs for training
@@ -25,6 +21,9 @@ args = parser.parse_args()
 input_size = 28 * 28
 # The number of target classes, you have 10 digits to classify
 num_classes = 10
+
+# NOTE: addition to recognize device
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Always make assignments to local variables from your args at the beginning of your code for better
 # control and adaptability
@@ -46,37 +45,54 @@ torch.backends.cudnn.benchmark = False
 g = torch.Generator()
 g.manual_seed(random_seed) # for data loader shuffling
 
+# transform = transforms.Compose([
+#     transforms.ToTensor(),
+#     transforms.Normalize(mean=0.1307, std=0.3081)
+# ])
+
 # MNIST Dataset (Images and Labels)
-train_dataset = dsets.MNIST(root='data', train=True, transform=transforms.ToTensor(), download=True)
-test_dataset = dsets.MNIST(root='data', train=False, transform=transforms.ToTensor())
+train_dataset = dsets.MNIST(root='data', train=True, transform=transform.ToTensor(), download=True)
+test_dataset = dsets.MNIST(root='data', train=False, transform=transform.ToTensor())
+
+
 
 # Dataset Loader (Input Pipeline)
 train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True, generator=g)
 test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
+dropout = 0.5
+
 # Define your model
-class LogisticRegression(nn.Module):
-    def __init__(self, input_size, num_classes):
-        super(LogisticRegression, self).__init__()
-        self.linear = nn.Linear(input_size, num_classes)
+class SimpleFC(nn.Module):
+    def __init__(self, input_size, num_classes, dropout):
+        super(SimpleFC, self).__init__()
+        self.linear1 = nn.Linear(input_size, 512)
+        self.dropout1 = nn.Dropout(dropout)
+        self.linear2 = nn.Linear(512, 256)
+        self.dropout2= nn.Dropout(dropout)
+        self.linear3 = nn.Linear(256, 128)
+        self.dropout3 = nn.Dropout(dropout)
+        self.linear4 = nn.Linear(128, num_classes)
 
     # Your model only contains a single linear layer
     def forward(self, x):
-        out = self.linear(x)
+        out = F.relu(self.linear1(x))
+        out = self.dropout1(out)
+        out = F.relu(self.linear2(out))
+        out = self.dropout2(out)
+        out = F.relu(self.linear3(out))
+        out = self.dropout3(out)
+        out = self.linear4(out)
         return out
 
 
-model = LogisticRegression(input_size, num_classes)
+model = SimpleFC(input_size, num_classes, dropout)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = model.to(device)
 
 # Define your loss and optimizer
 criterion = nn.CrossEntropyLoss()  # Softmax is internally computed.
 optimizer = torch.optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
-
-# NOTE: variable for time calculation
-total_train_time = 0 
-total_test_time = 0 # inference time
 
 # Training loop
 for epoch in range(num_epochs):
@@ -87,10 +103,7 @@ for epoch in range(num_epochs):
     # Sets the model in training mode.
     model = model.train()
     for batch_idx, (images, labels) in enumerate(train_loader):
-        # NOTE: start time for training
-        start_train_time = time.time()
-
-        # NOTE: move tensors into same device
+        # NOTE
         images, labels = images.to(device), labels.to(device) 
         # Here we vectorize the 28*28 images as several 784-dimensional inputs
         images = images.view(-1, input_size)
@@ -110,23 +123,17 @@ for epoch in range(num_epochs):
         _, predicted = outputs.max(1)
         train_total += labels.size(0)
         train_correct += predicted.eq(labels).sum().item()
-
-        # NOTE: end time for training 
-        train_time = time.time() - start_train_time
-        total_train_time += train_time
-
         # Print every 100 steps the following information
         if (batch_idx + 1) % 100 == 0:
             print('Epoch: [%d/%d], Step: [%d/%d], Loss: %.4f Acc: %.2f%%' % (epoch + 1, num_epochs, batch_idx + 1,
-                                                                             len(train_dataset) // batch_size,
-                                                                             train_loss / (batch_idx + 1),
-                                                                             100. * train_correct / train_total))            
-        # NOTE: index == 468
+                                                                            len(train_dataset) // batch_size,
+                                                                            train_loss / (batch_idx + 1),
+                                                                            100. * train_correct / train_total))       
         if (batch_idx + 1) == 468:
             print('Epoch: [%d/%d], Step: [%d/%d], Loss: %.4f Acc: %.2f%%' % (epoch + 1, num_epochs, batch_idx + 1,
-                                                                             len(train_dataset) // batch_size,
-                                                                             train_loss / (batch_idx + 1),
-                                                                             100. * train_correct / train_total))
+                                                                            len(train_dataset) // batch_size,
+                                                                            train_loss / (batch_idx + 1),
+                                                                            100. * train_correct / train_total))       
 
     # Testing phase
     test_correct = 0
@@ -138,8 +145,8 @@ for epoch in range(num_epochs):
     # It will reduce memory consumption for computations.
     with torch.no_grad():
         for batch_idx, (images, labels) in enumerate(test_loader):
-            start_test_time = time.time()
-            images, labels = images.to(device), labels.to(device)  # Move inside loop
+            # NOTE
+            images, labels = images.to(device), labels.to(device) 
             # Here we vectorize the 28*28 images as several 784-dimensional inputs
             images = images.view(-1, input_size)
             # Perform the actual inference
@@ -150,16 +157,6 @@ for epoch in range(num_epochs):
             # The outputs are one-hot labels, we need to find the actual predicted
             # labels which have the highest output confidence
             _, predicted = torch.max(outputs.data, 1)
-
-            # NOTE: end time for inference
-            test_time = time.time() - start_test_time
-            total_test_time += test_time
-
             test_total += labels.size(0)
             test_correct += predicted.eq(labels).sum().item()
-
     print('Test accuracy: %.2f %% Test loss: %.4f' % (100. * test_correct / test_total, test_loss / (batch_idx + 1)))
-
-print('Total training time: %.2f seconds' % total_train_time)
-print('Total inference time: %.2f seconds' % total_test_time)
-print('Average inference time per image: %.2f ms' % (total_test_time * 1000 / test_total))

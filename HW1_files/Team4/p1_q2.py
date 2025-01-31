@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Read log file content (assuming it's in a string called log_content)
-with open('problem2_question1_output.txt', 'r') as f:
+with open('1_8_32_arch.txt', 'r') as f:
     log_content = f.read()
 
 # # Extract epoch numbers and train loss
-pattern = r"Epoch: \[(\d+)/25\], Step: \[468/468\], Loss: ([\d.]+) Acc: ([\d.]+)%\nTest accuracy: ([\d.]+) % Test loss: ([\d.]+)"
+pattern = r"Epoch: \[(\d+)/25\], Step: \[400/468\], Loss: ([\d.]+) Acc: ([\d.]+)%\nTest accuracy: ([\d.]+) % Test loss: ([\d.]+)"
 
 matches = re.findall(pattern, log_content)
 epochs = [int(m[0]) for m in matches]
@@ -26,7 +26,7 @@ plt.title("Loss Plot")
 plt.grid(True, linestyle='--', alpha = 0.7)
 plt.legend()
 
-plt.savefig('loss_plot_2.png')    
+plt.savefig('SimpleCNN_loss_plot.png')    
 
 
 plt.clf()
@@ -39,4 +39,4 @@ plt.ylabel("Accuracy (%)")
 plt.title("Accuracy Plot")
 plt.grid(True, linestyle='--', alpha = 0.7)
 plt.legend()
-plt.savefig('accuracy_plot_2.png')
+plt.savefig('SimpleCNN_accuracy_plot.png')
